@@ -1,0 +1,27 @@
+name: Validate connector
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  connector:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Verify release files
+        run: sha256sum --check SHA256SUMS
+      - name: Connector safety and configuration tests
+        run: node --test tests/*.test.mjs
+      - name: Build add-on
+        run: docker build --build-arg BUILD_ARCH=${{ matrix.arch }} -t cozywash-ha-connector:1.0.0 cozywash_bridge
+      - name: Packaged container, HTTPS cloud and Shelly RPC integration
+        run: python3 scripts/test-container.py

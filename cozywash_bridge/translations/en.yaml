@@ -1,0 +1,23 @@
+configuration:
+  server_url:
+    name: CozyWash URL
+    description: Use https://cozywash.ro for production or the QA URL for testing.
+  bridge_token:
+    name: Location bridge token
+    description: Issue in CozyWash → Administration → Local bridge. This is not your account password.
+  allow_hardware:
+    name: Allow Shelly hardware control
+    description: Enable only after configuring and physically qualifying the machines in CozyWash.
+  shelly_devices:
+    name: Allowed Shelly devices
+    description: Static private IPs and CozyWash device IDs. Automatic discovery is not used.
+    fields:
+      device_id:
+        name: CozyWash device ID
+        description: The exact ID from Administration → Devices, not the Shelly name or serial.
+      host:
+        name: Private IP address
+        description: Shelly private IPv4 address, without a protocol or port.
+      password:
+        name: Shelly password
+        description: Local Shelly authentication password, if enabled. This is not your Home Assistant password.

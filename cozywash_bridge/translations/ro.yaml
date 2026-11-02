@@ -1,0 +1,23 @@
+configuration:
+  server_url:
+    name: Adresa CozyWash
+    description: Folosește https://cozywash.ro pentru producție sau adresa QA pentru teste.
+  bridge_token:
+    name: Tokenul locației
+    description: Token emis în CozyWash → Administrare → Bridge local. Nu este parola contului.
+  allow_hardware:
+    name: Permite controlul dispozitivelor Shelly
+    description: Activează numai după configurarea și verificarea fizică a mașinilor în CozyWash.
+  shelly_devices:
+    name: Dispozitive Shelly permise
+    description: Adresele IP fixe și identificatorii dispozitivelor din CozyWash. Nu se face descoperire automată.
+    fields:
+      device_id:
+        name: ID dispozitiv în CozyWash
+        description: Același ID ca în Administrare → Dispozitive, nu numele sau seria Shelly.
+      host:
+        name: Adresă IP locală
+        description: Adresa IPv4 privată a dispozitivului Shelly, fără http:// sau port.
+      password:
+        name: Parola Shelly
+        description: Parola autentificării locale Shelly, dacă este activată. Nu este parola Home Assistant.

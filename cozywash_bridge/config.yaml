@@ -1,0 +1,33 @@
+name: CozyWash Shelly Connector
+version: "1.0.0"
+slug: cozywash_bridge
+description: Conectează locația CozyWash la dispozitivele Shelly din rețeaua locală.
+url: https://github.com/SeerKan/cozywash-home-assistant
+arch:
+  - amd64
+  - aarch64
+startup: services
+boot: auto
+init: true
+timeout: 60
+backup: cold
+apparmor: true
+hassio_api: false
+homeassistant_api: false
+host_network: false
+ingress: false
+tmpfs: true
+watchdog: http://[HOST]:8099/health
+options:
+  server_url: https://cozywash.ro
+  bridge_token: ""
+  allow_hardware: false
+  shelly_devices: []
+schema:
+  server_url: url
+  bridge_token: password
+  allow_hardware: bool
+  shelly_devices:
+    - device_id: str
+      host: str
+      password: "password?"
