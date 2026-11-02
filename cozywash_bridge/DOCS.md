@@ -2,7 +2,7 @@
 
 ## Instalare
 
-Necesită Home Assistant OS sau o instalare cu Supervisor. Add-on-ul suportă mini PC-uri x86-64 (`amd64`) și sisteme ARM64 (`aarch64`). Adaugă repository-ul `https://github.com/SeerKan/cozywash-home-assistant` în Store, apoi instalează **CozyWash Shelly Connector**. Construirea imaginii se face pe mini PC; este necesar acces la internet pentru descărcarea imaginii de bază.
+Necesită Home Assistant OS sau o instalare cu Supervisor. Add-on-ul suportă mini PC-uri x86-64 (`amd64`) și sisteme ARM64 (`aarch64`). Adaugă repository-ul `https://github.com/SeerKan/cw-relay` în Store, apoi instalează **CozyWash Shelly Connector**. Construirea imaginii se face pe mini PC; este necesar acces la internet pentru descărcarea imaginii de bază.
 
 ## Prima locație
 

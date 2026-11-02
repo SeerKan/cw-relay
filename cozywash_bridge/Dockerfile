@@ -5,7 +5,7 @@ LABEL io.hass.version="${BUILD_VERSION}" \
       io.hass.type="addon" \
       io.hass.arch="${BUILD_ARCH}" \
       org.opencontainers.image.title="CozyWash Shelly Connector" \
-      org.opencontainers.image.source="https://github.com/SeerKan/cozywash-home-assistant"
+      org.opencontainers.image.source="https://github.com/SeerKan/cw-relay"
 WORKDIR /app
 COPY bridge ./bridge
 COPY options.mjs entrypoint.mjs ./
