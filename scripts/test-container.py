@@ -53,7 +53,9 @@ def main():
   control({'online':True,'orders':[],'command':None});until(lambda:health()['activeTasks']==0)
   control({'newOrder':'restart-safe','loadingSeconds':60,'power':50});until(lambda:any(r.get('phase')=='running' for r in cloud('/test/state')['readings']))
   before=len(cloud('/test/state')['sets']);assert before==3
-  assert docker('stop','--time','20',ADDON)==ADDON
+  # Docker versions may include deprecation notices in stdout; the command's
+  # successful exit and the container exit status are the shutdown contract.
+  docker('stop','--time','20',ADDON)
   assert json.loads(docker('inspect',ADDON))[0]['State']['ExitCode']==0
   control({'replay':True});docker('start',ADDON)
   until(lambda:health()['uncertainTasks']==1)
