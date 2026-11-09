@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2 — 2026-11-09
+
+- Sincronizarea cloud așteaptă finalizarea citirii locale în curs, evitând întreruperea telemetriei prin suprapunerea temporizatoarelor.
+- Citirile, comenzile și reconcilierea folosesc aceeași excludere mutuală; temporizările locale continuă în timpul operațiilor cloud.
+
 ## 1.0.1 — 2026-11-09
 
 - Recuperarea adresei IP pe sesiuni incerte păstrează jurnalul și blocarea de siguranță, fără reactivarea releelor.

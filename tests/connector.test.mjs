@@ -42,3 +42,18 @@ test('HA device IDs stay bound to their configured IP even when multiple devices
  await adapter.qualify(machine);await assert.rejects(()=>adapter.qualify({...machine,device:{...machine.device,host:'192.168.1.51'}}),/device_mapping_mismatch/);
  await assert.rejects(()=>adapter.qualify({...machine,deviceId:'b'}),/device_mapping_mismatch/);
 });
+
+test('cloud synchronization waits for a local safety tick instead of skipping fresh telemetry',async()=>{
+ const engine=fakeEngine();let releaseTick,heartbeat=0,readingBusy=false;
+ const firstTick=new Promise(r=>{releaseTick=r;});
+ engine.tick=async()=>{engine.ticks++;if(engine.ticks===1)await firstTick;};
+ engine.readings=async()=>{assert.equal(readingBusy,false);readingBusy=true;await new Promise(r=>setTimeout(r,10));readingBusy=false;return [];};
+ const bridge=startBridge({origin:'https://cozywash.test',token:'token',engine,tickInterval:1,syncInterval:10000,log:()=>{},fetchImpl:async url=>{
+  if(url.endsWith('/poll'))return response({serverTime:Date.now(),machines:[],commands:[]});
+  heartbeat++;return response({orders:[]});
+ }});
+ try{
+  await waitFor(()=>engine.ticks===1);await new Promise(r=>setTimeout(r,10));assert.equal(heartbeat,0);
+  releaseTick();await waitFor(()=>heartbeat===1);assert.ok(bridge.status().lastSync);assert.equal(bridge.status().connected,true);
+ }finally{releaseTick();await bridge.close();}
+});

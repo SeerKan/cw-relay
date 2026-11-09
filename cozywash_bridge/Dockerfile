@@ -1,5 +1,5 @@
 FROM node:24-bookworm-slim
-ARG BUILD_VERSION=1.0.1
+ARG BUILD_VERSION=1.0.2
 ARG BUILD_ARCH
 LABEL io.hass.version="${BUILD_VERSION}" \
       io.hass.type="addon" \
