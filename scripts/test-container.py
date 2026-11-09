@@ -52,8 +52,24 @@ def main():
   assert len(cloud('/test/state')['sets'])==2
   print('PASS: local loading expiry switches the emulated relay off during cloud outage; watchdog stays healthy',flush=True)
   control({'online':True,'orders':[],'command':None});until(lambda:health()['activeTasks']==0)
+  control({'newOrder':'metering-cycle','power':400,'energyWh':100})
+  until(lambda:any(r.get('phase')=='running' for r in cloud('/test/state')['readings']))
+  cycle_start=next(r['startedAt'] for r in cloud('/test/state')['readings'] if r.get('phase')=='running')
+  until(lambda:int(time.time()*1000)-cycle_start>=5500,timeout=10)
+  control({'online':False,'power':0,'energyWh':115})
+  until(lambda:not cloud('/test/state')['output'],timeout=15)
+  control({'online':True})
+  until(lambda:any(r.get('phase')=='completed' for r in cloud('/test/state')['readings']))
+  usage=next(r['usage'] for r in cloud('/test/state')['readings'] if r.get('phase')=='completed')
+  assert usage['energyWh']==15 and usage['energyComplete'] and not usage['simulated']
+  assert usage['cycleEndedAt']>=cycle_start+5000 and usage['completedAt']-usage['cycleEndedAt']>=3000
+  control({'energyWh':118})
+  until(lambda:any(r.get('energyWh')==118 for r in cloud('/test/state')['readings']))
+  assert next(r['usage'] for r in cloud('/test/state')['readings'] if r.get('phase')=='completed')==usage
+  control({'orders':[],'command':None});until(lambda:health()['activeTasks']==0)
+  print('PASS: per-order meter delta, physical completion timing and frozen measurements survive cloud outage',flush=True)
   control({'newOrder':'restart-safe','loadingSeconds':60,'power':50});until(lambda:any(r.get('phase')=='running' for r in cloud('/test/state')['readings']))
-  before=len(cloud('/test/state')['sets']);assert before==3
+  before=len(cloud('/test/state')['sets']);assert before==5
   # Docker versions may include deprecation notices in stdout; the command's
   # successful exit and the container exit status are the shutdown contract.
   docker('stop','--time','20',ADDON)
@@ -63,6 +79,7 @@ def main():
   restored=next(r for r in cloud('/test/state')['readings'] if r.get('phase')=='running')
   started_at=restored['startedAt']
   assert health()['uncertainTasks']==0
+  assert restored['usage']['energyStatus']=='measured' and restored['usage']['energyWh']==0
   assert len(cloud('/test/state')['sets'])==before and cloud('/test/state')['output']
   # Abrupt crash: committed journal must preserve the same start time too.
   docker('kill','--signal','KILL',ADDON);docker('start',ADDON)
@@ -73,6 +90,7 @@ def main():
   until(lambda:health()['uncertainTasks']==1)
   until(lambda:any(r.get('error')=='device_restarted_or_clock_changed' for r in cloud('/test/state')['readings']))
   assert len(cloud('/test/state')['sets'])==before and cloud('/test/state')['output']
+  assert next(r['usage'] for r in cloud('/test/state')['readings'] if r.get('orderId')=='restart-safe')['energyStatus']=='invalid'
   assert 'T'*43 not in docker('logs',ADDON) and 'fixture-password' not in docker('logs',ADDON)
   print('PASS: graceful restart and SIGKILL preserve running session/start time without replay; hardware reboot retains review lock',flush=True)
   print('PASS: logs contain no configured token or Shelly password',flush=True)

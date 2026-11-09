@@ -5,9 +5,9 @@ import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {networkInterfaces} from 'node:os';
 const host=Object.values(networkInterfaces()).flat().find(n=>n.family==='IPv4'&&!n.internal).address;
-const machine={id:'test-machine',deviceId:'test-shelly',locationId:'test-location',channel:0,hardwareApproved:true,startWatts:15,idleWatts:5,startConfirmSeconds:1,idleConfirmSeconds:30,minimumRunSeconds:30,device:{id:'test-shelly',host,mode:'shelly'}};
+const machine={id:'test-machine',deviceId:'test-shelly',locationId:'test-location',channel:0,hardwareApproved:true,startWatts:15,idleWatts:5,startConfirmSeconds:1,idleConfirmSeconds:3,minimumRunSeconds:5,device:{id:'test-shelly',host,mode:'shelly'}};
 const initialBootAt=Date.now()-120000;
-const state={bootAt:initialBootAt,mac:'AABBCCDDEEFF',online:true,output:false,power:0,sets:[],acks:[],readings:[],command:null,orders:[],replay:false};
+const state={bootAt:initialBootAt,mac:'AABBCCDDEEFF',online:true,output:false,power:0,energyWh:100,sets:[],acks:[],readings:[],command:null,orders:[],replay:false};
 const read=async req=>{let body='';for await(const c of req)body+=c;return body?JSON.parse(body):{};};
 const send=(res,data,status=200)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
 http(async(req,res)=>{
@@ -21,7 +21,7 @@ http(async(req,res)=>{
  if(call.method==='Switch.Set'){state.output=call.params.on;state.sets.push({on:state.output,at:Date.now()});}
  else if(call.method==='Sys.GetStatus')return send(res,{id:call.id,result:{mac:state.mac,uptime:Math.floor((Date.now()-state.bootAt)/1000)}});
  else if(call.method!=='Switch.GetStatus')return send(res,{error:{code:-1}});
- send(res,{id:call.id,result:{output:state.output,apower:state.power}});
+ send(res,{id:call.id,result:{output:state.output,apower:state.power,aenergy:{total:state.energyWh}}});
 }).listen(80,'0.0.0.0');
 https({key:readFileSync('/fixture/tls/key.pem'),cert:readFileSync('/fixture/tls/cert.pem')},async(req,res)=>{
  if(req.url==='/test/state')return send(res,state);

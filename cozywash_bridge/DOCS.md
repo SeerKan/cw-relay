@@ -65,3 +65,9 @@ Un jurnal vechi fără checkpoint hardware, dar cu pornire deja confirmată, pă
 ## Control manual
 
 În Administrare → Mașini → Control manual releu, administratorul introduce motivul și folosește Pornește releul / Oprește releul. Nu se selectează program și nu se aplică timer de oprire. Mașina este rezervată pentru intervenție până când conectorul confirmă oprirea. O sesiune de client activă sau în verificare blochează intervenția. Păstrează calificarea hardware și lista locală de dispozitive înaintea oricărei comenzi.
+
+## Consum și durată efectivă
+
+Administrarea afișează puterea canalului în W și contorul Shelly în kWh. Consumul unei comenzi este diferența contorului canalului între alimentarea releului și oprirea confirmată, incluzând încărcarea și confirmarea finalului. Durata efectivă este intervalul între pornirea detectată și începutul perioadei de consum redus care a confirmat finalul, fără timpul de confirmare. Precizia depinde de citiri și de pragurile configurate; durata programului rămâne o estimare separată și nu oprește aparatul.
+
+Baza contorului și momentele sunt păstrate în jurnal. Resetările contorului, repornirea Shelly și schimbarea identității invalidează consumul comenzii. Un contor absent sau un jurnal vechi fără bază de contor apare indisponibil, nu zero. Simulările sunt marcate și nu intră în totalul consumului real.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0 — 2026-11-09
+
+- Consum în Wh pe comandă, cu bază de contor păstrată în jurnal și măsurare invalidată la resetarea contorului sau schimbarea dispozitivului.
+- Momente locale pentru finalul detectat și oprirea releului; durata efectivă exclude confirmarea finalului și rămâne corectă la raportarea întârziată.
+- Măsurătorile finalizate sunt înghețate și supraviețuiesc restartului; comenzile vechi fără bază de contor nu primesc consum inventat.
+
 ## 1.2.0 — 2026-11-09
 
 - Control manual ON/OFF din administrare, fără program sau timer, cu jurnal persistent și confirmarea stării fizice.

@@ -16,7 +16,26 @@ export class BridgeEngine {
   tasks(){return this.db.prepare('SELECT data FROM tasks').all().map(r=>JSON.parse(r.data));}
   task(machineId){const r=this.db.prepare('SELECT data FROM tasks WHERE machine_id=?').get(machineId);return r&&JSON.parse(r.data);}
   save(task){this.db.prepare('INSERT INTO tasks VALUES(?,?) ON CONFLICT(machine_id) DO UPDATE SET data=excluded.data').run(task.machine.id,JSON.stringify(task));}
+  measure(task,reading){
+    if(task.usageVersion!==1||task.energyFinal)return task;
+    const now=this.now(),simulated=task.machine.device.mode==='simulator';
+    const energy=simulated?(Number.isFinite(task.startedAt)?Math.max(0,(now-task.startedAt))*400/3600000:0):reading.energyWh;
+    let status=task.energyStatus;
+    if(status!=='invalid'&&((Number.isFinite(energy)&&energy<0)||(Number.isFinite(energy)&&Number.isFinite(task.energyLastWh)&&energy+0.001<task.energyLastWh)||(task.energyMac&&reading.deviceMac!==task.energyMac)))status='invalid';
+    const valid=Number.isFinite(energy)&&energy>=0&&Number.isFinite(task.energyStartWh)&&status!=='invalid';
+    return {...task,energyStatus:valid?'measured':status==='invalid'?'invalid':'unavailable',
+      ...(valid?{energyLastWh:energy,energyObservedAt:now,energyUsedWh:Math.max(0,energy-task.energyStartWh)}:{}),
+      ...(['completed','loading_expired'].includes(task.phase)?{energyFinal:true,energyComplete:valid}:{} )};
+  }
+  usage(task){
+    if(task?.usageVersion!==1)return undefined;
+    return {version:1,energyWh:task.energyStatus==='measured'?task.energyUsedWh:null,energyStatus:task.energyStatus,
+      energyComplete:task.energyComplete===true,energyObservedAt:task.energyObservedAt??null,
+      cycleEndedAt:task.cycleEndedAt??null,completedAt:task.completedAt??null,
+      simulated:task.machine.device.mode==='simulator'};
+  }
   checkpoint(task,reading){
+    task=this.measure(task,reading);
     return {...task,output:reading.output,deviceError:null,checkpoint:{at:this.now(),deviceMac:reading.deviceMac,deviceUptime:reading.deviceUptime,energyWh:reading.energyWh,output:reading.output}};
   }
   verifyContinuity(task,reading){
@@ -64,7 +83,7 @@ export class BridgeEngine {
         if(this.now()>command.deadline)throw new Error('expired_command');
         if(initial.output!==false||task)throw new Error('machine_not_idle');
         await this.adapter.qualify(machine);
-        task={orderId:command.orderId,machine,phase:'enabling',loadingSeconds:command.loadingSeconds,durationSeconds:command.durationSeconds,output:false};this.save(task);
+        task={orderId:command.orderId,machine,phase:'enabling',loadingSeconds:command.loadingSeconds,durationSeconds:command.durationSeconds,output:false,usageVersion:1,energyStartWh:machine.device.mode==='simulator'?0:initial.energyWh,energyLastWh:machine.device.mode==='simulator'?0:initial.energyWh,energyMac:initial.deviceMac,energyStatus:'unavailable'};this.save(task);
         await this.set(machine,true);
         task=this.checkpoint({...task,phase:'loading',output:true,activatedAt:this.now(),loadingDeadline:this.now()+command.loadingSeconds*1000},await this.read(machine));this.save(task);
         ack={ok:true,output:true,at:task.activatedAt};
@@ -122,6 +141,7 @@ export class BridgeEngine {
     for(let task of this.tasks()){
       try{
         let reading=await this.read(task.machine);const now=this.now();
+        task=this.measure(task,reading);
         if(task.manualId){this.save(this.observeManual(task,reading));continue;}
         if(task.recovering)task=this.recover(task,reading);
         else if(['loading','running'].includes(task.phase))this.verifyContinuity(task,reading);
@@ -144,14 +164,15 @@ export class BridgeEngine {
         }
         if(task.phase==='running'){
           if(task.machine.device.mode==='simulator'){
-            if(now-task.startedAt>=Math.max(8000,task.durationSeconds*1000/this.speed)){reading=await this.set(task.machine,false);task.phase='completed';task.output=false;}
+            if(now-task.startedAt>=Math.max(8000,task.durationSeconds*1000/this.speed)){reading=await this.set(task.machine,false);task.phase='completed';task.output=false;task.completedAt=now;task.cycleEndedAt=now;}
           }else{
-            if(!task.needsActivityEvidence&&now>=(task.completionNotBefore||0)&&reading.apower<=task.machine.idleWatts&&now-task.startedAt>=task.machine.minimumRunSeconds*1000){task.idleCandidate??=now;if(now-task.idleCandidate>=task.machine.idleConfirmSeconds*1000){reading=await this.set(task.machine,false);task.phase='completed';task.output=false;}}
+            if(!task.needsActivityEvidence&&now>=(task.completionNotBefore||0)&&reading.apower<=task.machine.idleWatts&&now-task.startedAt>=task.machine.minimumRunSeconds*1000){task.idleCandidate??=now;if(now-task.idleCandidate>=task.machine.idleConfirmSeconds*1000){reading=await this.set(task.machine,false);task.phase='completed';task.output=false;task.completedAt=now;task.cycleEndedAt=task.idleCandidate;}}
             else task.idleCandidate=null;
           }
         }
         this.save(this.checkpoint(task,reading));
       }catch(e){
+        if(['device_identity_changed','device_restarted_or_clock_changed','device_energy_reset'].includes(e.message))task={...task,energyStatus:'invalid'};
         const transient=['device_unreachable','device_http_error','device_rpc_error','invalid_device_telemetry','fetch failed','The operation was aborted due to timeout'].includes(e.message)||e.name==='TimeoutError'||e.name==='TypeError';
         this.save(transient&&['loading','running'].includes(task.phase)?{...task,recovering:true,recoveryPhase:task.recoveryPhase||task.phase,error:'device_unreachable',deviceError:'device_unreachable',idleCandidate:null,startConfirmSince:null}:task.phase==='uncertain'?{...task,deviceError:e.message}:{...task,phase:'uncertain',recovering:false,error:e.message});
       }
@@ -174,6 +195,7 @@ export class BridgeEngine {
       try{
         task=await this.recoverAddress(machine,task);
         const target=task?.machine||machine,reading=await this.read(target);
+        if(task)task=this.measure(task,reading);
         if(task?.manualId){task=this.observeManual(task,reading);this.save(task);}
         else if(task){
           // A report cannot overwrite the last continuity checkpoint before the
@@ -185,12 +207,13 @@ export class BridgeEngine {
           }
           task=this.checkpoint(task,reading);this.save(task);
         }
-        readings.push({machineId:machine.id,manualRelaySupported:true,manualId:task?.manualId,manualCommandId:task?.manualCommandId,orderId:task?.orderId,phase:task?.phase||(!reading.output?'idle':'uncertain'),activatedAt:task?.activatedAt,startedAt:task?.startedAt,monitoringResumedAt:task?.monitoringResumedAt,...reading,error:task?.error,deviceError:null,deviceHost:target.device.host,observedAt:this.now()});
+        readings.push({machineId:machine.id,manualRelaySupported:true,manualId:task?.manualId,manualCommandId:task?.manualCommandId,orderId:task?.orderId,phase:task?.phase||(!reading.output?'idle':'uncertain'),activatedAt:task?.activatedAt,startedAt:task?.startedAt,monitoringResumedAt:task?.monitoringResumedAt,usage:this.usage(task),...reading,error:task?.error,deviceError:null,deviceHost:target.device.host,observedAt:this.now()});
       }catch(e){
         const deviceError=/^[a-z_]{1,60}$/.test(e.message)?e.message:'device_unreachable';
+        if(task&&['device_identity_changed','device_restarted_or_clock_changed','device_energy_reset'].includes(deviceError))task={...task,energyStatus:'invalid'};
         const fatal=['unexpected_power_loss','device_identity_changed','device_identity_unavailable','device_restarted_or_clock_changed','device_energy_reset','invalid_recovery_checkpoint','invalid_recovery_phase','start_time_missing','start_during_outage_unknown'].includes(deviceError);
         if(task)this.save(fatal?{...task,phase:'uncertain',recovering:false,error:deviceError,deviceError}:{...task,deviceError});
-        readings.push({machineId:machine.id,manualRelaySupported:true,manualId:task?.manualId,manualCommandId:task?.manualCommandId,orderId:task?.orderId,phase:'uncertain',output:task?.output??true,error:deviceError,deviceError});
+        readings.push({machineId:machine.id,manualRelaySupported:true,manualId:task?.manualId,manualCommandId:task?.manualCommandId,orderId:task?.orderId,phase:'uncertain',output:task?.output??true,usage:this.usage(task),error:deviceError,deviceError});
       }
     }return readings;
   }
