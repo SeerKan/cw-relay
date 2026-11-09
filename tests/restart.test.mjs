@@ -83,3 +83,22 @@ test('a refused command during restart recovery cannot silently release its resu
   await f.engine.tick();assert.equal(f.engine.task('m').phase,'uncertain');assert.deepEqual(f.b.writes,[true]);
  }finally{f.close();}
 });
+test('historical review locks stay locked and preserve their reason across later transport failures',async()=>{
+ for(const error of ['bridge_restarted','The operation was aborted due to timeout','unexpected_power_loss']){
+  const f=fixture();try{
+   await f.start();const startedAt=f.engine.task('m').startedAt;
+   f.engine.save({...f.engine.task('m'),phase:'uncertain',recovering:false,error});
+   f.b.unreachable=true;await f.engine.tick();
+   assert.equal(f.engine.task('m').error,error);f.b.unreachable=false;f.restart();await f.engine.tick();
+   assert.equal(f.engine.task('m').phase,'uncertain');assert.equal(f.engine.task('m').startedAt,startedAt);assert.deepEqual(f.b.writes,[true]);
+  }finally{f.close();}
+ }
+});
+test('an actual power loss followed by timeout and restart cannot release the hardware review lock',async()=>{
+ const f=fixture();try{
+  await f.start();f.b.output=false;await f.engine.tick();assert.equal(f.engine.task('m').error,'unexpected_power_loss');
+  f.b.output=true;f.b.unreachable=true;await f.engine.tick();
+  assert.equal(f.engine.task('m').error,'unexpected_power_loss');f.b.unreachable=false;f.restart();await f.engine.tick();
+  assert.equal(f.engine.task('m').phase,'uncertain');assert.deepEqual(f.b.writes,[true]);
+ }finally{f.close();}
+});

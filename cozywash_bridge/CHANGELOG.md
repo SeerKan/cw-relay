@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1 — 2026-11-09
+
+- Păstrează motivul blocării unei sesiuni în verificare chiar dacă apar ulterior erori de comunicație. Un timeout ulterior nu poate ascunde o pierdere reală a alimentării.
+
+
 ## 1.1.0 — 2026-11-09
 
 - Sesiunile în încărcare/rulare și momentele originale se păstrează la restart/deploy; releul este verificat înainte de reluarea monitorizării, fără retrimiterea pornirii.

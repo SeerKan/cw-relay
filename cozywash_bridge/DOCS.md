@@ -60,4 +60,4 @@ Conectorul poate muta doar adresa unui jurnal incert, păstrând canalul, pragur
 
 ## Limitele recuperării
 
-Un jurnal vechi fără checkpoint hardware, dar cu pornire deja confirmată, păstrează cronometrul; înainte de finalizarea automată cere consum activ nou și un interval minim de monitorizare. O sesiune deja în verificare nu este rezolvată automat. O activare întreruptă exact înainte de confirmarea releului sau o fereastră de încărcare traversată fără nicio dovadă de pornire cere verificare; timpul pornirii nu se inventează.
+Un jurnal vechi fără checkpoint hardware, dar cu pornire deja confirmată, păstrează cronometrul; înainte de finalizarea automată cere consum activ nou și un interval minim de monitorizare. Sesiunile deja blocate în verificare rămân blocate; o eroare de comunicație ulterioară păstrează motivul inițial al blocării. O activare întreruptă exact înainte de confirmarea releului sau o fereastră de încărcare traversată fără nicio dovadă de pornire cere verificare; timpul pornirii nu se inventează.

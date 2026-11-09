@@ -10,7 +10,7 @@ export class BridgeEngine {
     for(const task of this.tasks())if(task.machine.device.mode==='shelly'){
       if(['loading','running'].includes(task.phase))this.save({...task,recovering:true,recoveryPhase:task.phase,startConfirmSince:null,idleCandidate:null});
       else if(task.phase==='enabling')this.save({...task,phase:'uncertain',error:'interrupted_enable'});
-      // Existing review locks are never silently released by a software upgrade.
+      // Hardware faults and sessions without a confirmed start retain operator review.
     }
   }
   tasks(){return this.db.prepare('SELECT data FROM tasks').all().map(r=>JSON.parse(r.data));}
@@ -124,7 +124,7 @@ export class BridgeEngine {
         this.save(this.checkpoint(task,reading));
       }catch(e){
         const transient=['device_unreachable','device_http_error','device_rpc_error','invalid_device_telemetry','fetch failed','The operation was aborted due to timeout'].includes(e.message)||e.name==='TimeoutError'||e.name==='TypeError';
-        this.save(transient&&['loading','running'].includes(task.phase)?{...task,recovering:true,recoveryPhase:task.recoveryPhase||task.phase,error:'device_unreachable',deviceError:'device_unreachable',idleCandidate:null,startConfirmSince:null}:{...task,phase:'uncertain',recovering:false,error:e.message});
+        this.save(transient&&['loading','running'].includes(task.phase)?{...task,recovering:true,recoveryPhase:task.recoveryPhase||task.phase,error:'device_unreachable',deviceError:'device_unreachable',idleCandidate:null,startConfirmSince:null}:task.phase==='uncertain'?{...task,deviceError:e.message}:{...task,phase:'uncertain',recovering:false,error:e.message});
       }
     }
   }
