@@ -61,3 +61,7 @@ Conectorul poate muta doar adresa unui jurnal incert, păstrând canalul, pragur
 ## Limitele recuperării
 
 Un jurnal vechi fără checkpoint hardware, dar cu pornire deja confirmată, păstrează cronometrul; înainte de finalizarea automată cere consum activ nou și un interval minim de monitorizare. Sesiunile deja blocate în verificare rămân blocate; o eroare de comunicație ulterioară păstrează motivul inițial al blocării. O activare întreruptă exact înainte de confirmarea releului sau o fereastră de încărcare traversată fără nicio dovadă de pornire cere verificare; timpul pornirii nu se inventează.
+
+## Control manual
+
+În Administrare → Mașini → Control manual releu, administratorul introduce motivul și folosește Pornește releul / Oprește releul. Nu se selectează program și nu se aplică timer de oprire. Mașina este rezervată pentru intervenție până când conectorul confirmă oprirea. O sesiune de client activă sau în verificare blochează intervenția. Păstrează calificarea hardware și lista locală de dispozitive înaintea oricărei comenzi.

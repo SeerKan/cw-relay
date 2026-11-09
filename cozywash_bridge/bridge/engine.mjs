@@ -55,8 +55,10 @@ export class BridgeEngine {
     if(previous?.ack)return JSON.parse(previous.ack);
     if(previous){const reading=await this.read(command.machine).catch(()=>({output:true}));const ack={ok:false,output:reading.output,at:this.now(),error:'interrupted_command',definitelyNotStarted:false};this.finish(command,ack);return ack;}
     this.db.prepare('INSERT INTO journal(id,data) VALUES(?,?)').run(command.id,JSON.stringify(command));
+    if(command.action==='manual_relay')return this.manualCommand(command);
     const machine=command.machine;let task=this.task(machine.id);let ack;
     try{
+      if(task?.manualId)throw Error('manual_hold_active');
       if(command.action==='enable'){
         const initial=await this.read(machine);
         if(this.now()>command.deadline)throw new Error('expired_command');
@@ -89,11 +91,38 @@ export class BridgeEngine {
     }
     this.finish(command,ack);return ack;
   }
+  async manualCommand(command){
+    const machine=command.machine,existing=this.task(machine.id);let ack;
+    try{
+      if(typeof command.on!=='boolean'||!command.manualId||!Number.isFinite(command.deadline))throw Error('invalid_manual_command');
+      if(this.now()>command.deadline)throw Error('expired_command');
+      // Never take over a customer task, including one locked for operator review.
+      if(existing&&(!existing.manualId||existing.manualId!==command.manualId))throw Error('machine_not_idle');
+      const reading=await this.read(machine);
+      if(command.on&&(existing||reading.output!==false))throw Error('machine_not_idle');
+      await this.adapter.qualify(machine);
+      if(this.now()>command.deadline)throw Error('expired_command');
+      this.save({machine,manualId:command.manualId,manualCommandId:command.id,manualOn:command.on,phase:'uncertain',output:reading.output,error:'manual_unconfirmed'});
+      const confirmed=await this.set(machine,command.on);
+      this.save(this.checkpoint({machine,manualId:command.manualId,manualCommandId:command.id,manualOn:command.on,phase:command.on?'manual_on':'manual_off',output:command.on,error:null},confirmed));
+      ack={ok:true,output:command.on,at:this.now()};
+    }catch(error){
+      const reading=await this.read(machine).catch(()=>({output:true}));
+      const task=this.task(machine.id);
+      if(task?.manualId===command.manualId)this.save({...task,phase:'uncertain',output:reading.output,error:error.message});
+      ack={ok:false,output:reading.output,at:this.now(),error:error.message};
+    }
+    this.finish(command,ack);return ack;
+  }
+  observeManual(task,reading){
+    return this.checkpoint({...task,phase:reading.output===task.manualOn?(task.manualOn?'manual_on':'manual_off'):'uncertain',error:reading.output===task.manualOn?null:'manual_output_changed'},reading);
+  }
   finish(command,ack){this.db.prepare('UPDATE journal SET ack=? WHERE id=?').run(JSON.stringify(ack),command.id);}
   async tick(){
     for(let task of this.tasks()){
       try{
         let reading=await this.read(task.machine);const now=this.now();
+        if(task.manualId){this.save(this.observeManual(task,reading));continue;}
         if(task.recovering)task=this.recover(task,reading);
         else if(['loading','running'].includes(task.phase))this.verifyContinuity(task,reading);
         if(reading.apower>=task.machine.startWatts)task.needsActivityEvidence=false;
@@ -131,7 +160,7 @@ export class BridgeEngine {
   async recoverAddress(machine,task){
     if(!task||task.machine.device.host===machine.device.host)return task;
     const old=task.machine;
-    if((task.phase!=='uncertain'&&!task.recovering)||old.id!==machine.id||old.deviceId!==machine.deviceId||old.locationId!==machine.locationId||old.channel!==machine.channel||old.device.id!==machine.device.id||old.device.mode!==machine.device.mode)throw new Error('mapping_mismatch');
+    if((!task.manualId&&task.phase!=='uncertain'&&!task.recovering)||old.id!==machine.id||old.deviceId!==machine.deviceId||old.locationId!==machine.locationId||old.channel!==machine.channel||old.device.id!==machine.device.id||old.device.mode!==machine.device.mode)throw new Error('mapping_mismatch');
     // Only replace the endpoint on a locked task. Keep every original safety threshold and never resume it.
     const recovered={...old,device:{...old.device,host:machine.device.host}};
     await this.adapter.qualify(recovered,{control:false});
@@ -145,7 +174,8 @@ export class BridgeEngine {
       try{
         task=await this.recoverAddress(machine,task);
         const target=task?.machine||machine,reading=await this.read(target);
-        if(task){
+        if(task?.manualId){task=this.observeManual(task,reading);this.save(task);}
+        else if(task){
           // A report cannot overwrite the last continuity checkpoint before the
           // safety loop verifies it, nor publish an unverified running phase.
           if(task.recovering)task=this.recover(task,reading);
@@ -155,18 +185,18 @@ export class BridgeEngine {
           }
           task=this.checkpoint(task,reading);this.save(task);
         }
-        readings.push({machineId:machine.id,orderId:task?.orderId,phase:task?.phase||(!reading.output?'idle':'uncertain'),activatedAt:task?.activatedAt,startedAt:task?.startedAt,monitoringResumedAt:task?.monitoringResumedAt,...reading,error:task?.error,deviceError:null,deviceHost:target.device.host,observedAt:this.now()});
+        readings.push({machineId:machine.id,manualRelaySupported:true,manualId:task?.manualId,manualCommandId:task?.manualCommandId,orderId:task?.orderId,phase:task?.phase||(!reading.output?'idle':'uncertain'),activatedAt:task?.activatedAt,startedAt:task?.startedAt,monitoringResumedAt:task?.monitoringResumedAt,...reading,error:task?.error,deviceError:null,deviceHost:target.device.host,observedAt:this.now()});
       }catch(e){
         const deviceError=/^[a-z_]{1,60}$/.test(e.message)?e.message:'device_unreachable';
         const fatal=['unexpected_power_loss','device_identity_changed','device_identity_unavailable','device_restarted_or_clock_changed','device_energy_reset','invalid_recovery_checkpoint','invalid_recovery_phase','start_time_missing','start_during_outage_unknown'].includes(deviceError);
         if(task)this.save(fatal?{...task,phase:'uncertain',recovering:false,error:deviceError,deviceError}:{...task,deviceError});
-        readings.push({machineId:machine.id,orderId:task?.orderId,phase:'uncertain',output:task?.output??true,error:deviceError,deviceError});
+        readings.push({machineId:machine.id,manualRelaySupported:true,manualId:task?.manualId,manualCommandId:task?.manualCommandId,orderId:task?.orderId,phase:'uncertain',output:task?.output??true,error:deviceError,deviceError});
       }
     }return readings;
   }
   reconcile(serverOrders){
     const ids=new Set(serverOrders.map(o=>o.id));
-    for(const task of this.tasks())if(!ids.has(task.orderId)&&task.output===false&&task.deviceError===null&&['completed','loading_expired','uncertain'].includes(task.phase))this.db.prepare('DELETE FROM tasks WHERE machine_id=?').run(task.machine.id);
+    for(const task of this.tasks())if(!ids.has(task.manualId||task.orderId)&&task.output===false&&task.deviceError===null&&['completed','loading_expired','uncertain','manual_off'].includes(task.phase))this.db.prepare('DELETE FROM tasks WHERE machine_id=?').run(task.machine.id);
   }
   close(){this.db.close();}
 }

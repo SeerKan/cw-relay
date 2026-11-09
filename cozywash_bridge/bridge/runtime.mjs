@@ -35,7 +35,7 @@ export function startBridge({origin,token,path,allowHardware=false,allowedHosts=
           if(stopping)return;
           const matching=machines.find(m=>m.id===command.machine.id);
           if(!matching||matching.deviceId!==command.machine.deviceId||matching.channel!==command.machine.channel||matching.device.host!==command.machine.device.host)throw new Error('mapping_mismatch');
-          if(command.action==='enable'&&!clockValid)return;
+          if((command.action==='enable'||command.action==='manual_relay')&&!clockValid)return;
           return await engine.command(command);
         });
         if(ack)try{await api(`/commands/${encodeURIComponent(command.id)}/ack`,ack);}catch{warning('bridge_acknowledgement_unavailable');}

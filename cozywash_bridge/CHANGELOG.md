@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0 — 2026-11-09
+
+- Control manual ON/OFF din administrare, fără program sau timer, cu jurnal persistent și confirmarea stării fizice.
+- Intervențiile manuale rezervă mașina până la oprirea confirmată și nu pot prelua o sesiune de client.
+- Restartul și pierderea conexiunii cloud nu opresc automat o intervenție manuală și nu retrimit pornirea.
+
+
 ## 1.1.1 — 2026-11-09
 
 - Păstrează motivul blocării unei sesiuni în verificare chiar dacă apar ulterior erori de comunicație. Un timeout ulterior nu poate ascunde o pierdere reală a alimentării.
