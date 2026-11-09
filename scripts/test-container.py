@@ -1,7 +1,8 @@
 """Run on a Docker host against the packaged add-on and an isolated Shelly/HTTPS emulator."""
 import json, os, pathlib, shutil, subprocess, tempfile, time
 ROOT=pathlib.Path(__file__).resolve().parents[1]
-BASE=ROOT/'.local'/'ha-container-test'
+# Each run needs an empty journal; replay behavior is tested within that run.
+BASE=ROOT/'.local'/('ha-container-test-'+str(time.time_ns()))
 IMAGE=os.environ.get('COZYWASH_ADDON_TEST_IMAGE','cozywash-ha-connector:1.0.0')
 NETWORK='cozywash-ha-test-network'
 EMULATOR='cozywash-ha-test-cloud'
