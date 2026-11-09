@@ -83,15 +83,35 @@ export class BridgeEngine {
       }catch(e){this.save({...task,phase:'uncertain',error:e.message});}
     }
   }
+  async recoverAddress(machine,task){
+    if(!task||task.machine.device.host===machine.device.host)return task;
+    const old=task.machine;
+    if(task.phase!=='uncertain'||old.id!==machine.id||old.deviceId!==machine.deviceId||old.locationId!==machine.locationId||old.channel!==machine.channel||old.device.id!==machine.device.id||old.device.mode!==machine.device.mode)throw new Error('mapping_mismatch');
+    // Only replace the endpoint on a locked task. Keep every original safety threshold and never resume it.
+    const recovered={...old,device:{...old.device,host:machine.device.host}};
+    await this.adapter.qualify(recovered,{control:false});
+    const reading=await this.adapter.read(recovered,task);
+    task={...task,machine:recovered,output:reading.output,deviceError:null};this.save(task);return task;
+  }
   async readings(machines){
     const readings=[];
     for(const machine of machines){
-      const task=this.task(machine.id);try{const reading=await this.read(task?.machine||machine);if(task)this.save({...task,output:reading.output});readings.push({machineId:machine.id,orderId:task?.orderId,phase:task?.phase||(!reading.output?'idle':'uncertain'),activatedAt:task?.activatedAt,startedAt:task?.startedAt,...reading,error:task?.error});}catch{readings.push({machineId:machine.id,orderId:task?.orderId,phase:'uncertain',output:task?.output??true,error:'device_unreachable'});}
+            let task=this.task(machine.id);
+      try{
+        task=await this.recoverAddress(machine,task);
+        const target=task?.machine||machine,reading=await this.read(target);
+        if(task)this.save({...task,output:reading.output,deviceError:null});
+        readings.push({machineId:machine.id,orderId:task?.orderId,phase:task?.phase||(!reading.output?'idle':'uncertain'),activatedAt:task?.activatedAt,startedAt:task?.startedAt,...reading,error:task?.error,deviceError:null,deviceHost:target.device.host,observedAt:this.now()});
+      }catch(e){
+        const deviceError=/^[a-z_]{1,60}$/.test(e.message)?e.message:'device_unreachable';
+        if(task)this.save({...task,deviceError});
+        readings.push({machineId:machine.id,orderId:task?.orderId,phase:'uncertain',output:task?.output??true,error:deviceError,deviceError});
+      }
     }return readings;
   }
   reconcile(serverOrders){
     const ids=new Set(serverOrders.map(o=>o.id));
-    for(const task of this.tasks())if(!ids.has(task.orderId)&&task.output===false&&['completed','loading_expired','uncertain'].includes(task.phase))this.db.prepare('DELETE FROM tasks WHERE machine_id=?').run(task.machine.id);
+    for(const task of this.tasks())if(!ids.has(task.orderId)&&task.output===false&&task.deviceError===null&&['completed','loading_expired','uncertain'].includes(task.phase))this.db.prepare('DELETE FROM tasks WHERE machine_id=?').run(task.machine.id);
   }
   close(){this.db.close();}
 }

@@ -49,3 +49,10 @@ Fila **Log** afișează pornirea și coduri de diagnostic fără tokenuri, parol
 Starea cloud și telemetria mașinilor se urmăresc în CozyWash → Bridge local. Endpoint-ul intern `/health` este rezervat watchdog-ului; nu publică porturi pe gazdă și nu oferă comenzi de control.
 
 Pentru actualizare, folosește **Update** în Home Assistant și păstrează datele add-on-ului. La schimbarea tokenului sau a configurației, salvează și repornește add-on-ul. După mutarea pe alt mini PC, restaurează backup-ul și verifică fizic orice sesiune incertă înainte de a accepta rezervări noi.
+
+
+## Recuperare după schimbarea IP-ului Shelly
+
+Configurează noul IP pentru același device_id în conector și salvează/repornește. În CozyWash → Dispozitive modifică exclusiv IP-ul. Schimbarea este permisă dacă toate comenzile afectate sunt în verificare; o sesiune în desfășurare blochează în continuare schimbarea. Comenzile vechi în așteptare se anulează și citirile vechi se invalidează.
+
+Conectorul poate muta doar adresa unui jurnal incert, păstrând canalul, pragurile, istoricul și blocarea. Citește adresa nouă numai dacă lista locală o permite pentru același dispozitiv. Nu pornește și nu oprește releul pentru recuperare. După o citire nouă care confirmă ieșirea oprită, operatorul verifică aparatul și rezolvă comanda din CozyWash → Comenzi. Jurnalul se eliberează după confirmarea serverului. Nu șterge jurnalul.

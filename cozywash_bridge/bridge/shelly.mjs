@@ -10,9 +10,9 @@ export function digestHeader(challenge,password){
 }
 export class ShellyAdapter {
   constructor({allowHardware=false,allowedHosts=[],passwords={},deviceHosts=null,fetchImpl=fetch}={}){this.allowHardware=allowHardware;this.allowedHosts=allowedHosts;this.passwords=passwords;this.deviceHosts=deviceHosts;this.fetch=fetchImpl;this.simOutputs=new Map();}
-  async qualify(machine){
+  async qualify(machine,{control=true}={}){
     if(machine.device.mode==='simulator')return;
-    if(!this.allowHardware||!machine.hardwareApproved)throw new Error('hardware_not_commissioned');
+    if(control&&(!this.allowHardware||!machine.hardwareApproved))throw new Error('hardware_not_commissioned');
     const host=machine.device.host;
     const privateIP=isIP(host)===4&&(/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host));
     if(!privateIP||!this.allowedHosts.includes(host))throw new Error('host_not_allowlisted');
@@ -20,7 +20,7 @@ export class ShellyAdapter {
     if(!Number.isInteger(machine.channel)||machine.channel<0||machine.channel>3)throw new Error('invalid_channel');
   }
   async rpc(machine,method,params){
-    await this.qualify(machine);
+    await this.qualify(machine,{control:method!=='Switch.GetStatus'});
     const url=`http://${machine.device.host}/rpc`,body=JSON.stringify({id:1,method,params}),options={method:'POST',headers:{'Content-Type':'application/json'},body,signal:AbortSignal.timeout(4000),redirect:'error'};
     let response=await this.fetch(url,options);
     if(response.status===401){const password=this.passwords[machine.device.id];if(!password)throw new Error('device_credentials_missing');const challenge=response.headers.get('www-authenticate')||'';await response.arrayBuffer();response=await this.fetch(url,{...options,headers:{...options.headers,Authorization:digestHeader(challenge,password)},signal:AbortSignal.timeout(4000)});}

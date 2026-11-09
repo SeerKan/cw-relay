@@ -16,3 +16,34 @@ test('bridge restart retains command journal and marks real active hardware unce
 test('safety gate requires commissioning and exact private-IP allowlist',async()=>{const adapter=new ShellyAdapter({allowHardware:true,allowedHosts:['192.168.1.50']});await assert.rejects(()=>adapter.qualify({channel:0,hardwareApproved:false,device:{mode:'shelly',host:'192.168.1.50'}}));await assert.rejects(()=>adapter.qualify({channel:0,hardwareApproved:true,device:{mode:'shelly',host:'8.8.8.8'}}));await adapter.qualify({channel:0,hardwareApproved:true,device:{mode:'shelly',host:'192.168.1.50'}});});
 test('Shelly SHA-256 digest challenge is handled without exposing password',()=>{const header=digestHeader('Digest qop="auth", realm="shellypro4pm-abc", nonce="abcd", algorithm=SHA-256','example-password');assert.match(header,/algorithm=SHA-256/);assert.match(header,/nc=00000001/);assert.equal(header.includes('example-password'),false);assert.throws(()=>digestHeader('Basic realm="x"','test'));});
 test('operator resolution clears an uncertain durable task after fresh power-off observation',async()=>{const f=fixture();await f.engine.command(f.command);f.off();await f.engine.tick();assert.equal(f.engine.task('m').phase,'uncertain');const readings=await f.engine.readings([f.machine]);assert.equal(readings[0].output,false);f.engine.reconcile([]);assert.equal(f.engine.task('m'),undefined);f.engine.close();});
+test('address recovery reads the new endpoint on an uncertain task without replaying or resuming',async()=>{
+ const f=fixture('shelly');await f.engine.command(f.command);f.off();await f.engine.tick();
+ const old=f.engine.task('m');assert.equal(old.phase,'uncertain');let host;
+ f.engine.adapter.read=async m=>{host=m.device.host;return {output:false,apower:0};};
+ const current={...f.machine,device:{...f.machine.device,host:'192.168.30.68'}};
+ const result=(await f.engine.readings([current]))[0];
+ assert.equal(host,current.device.host);assert.equal(result.deviceError,null);assert.equal(result.deviceHost,current.device.host);assert.equal(result.phase,'uncertain');assert.equal(f.sets,1);
+ assert.equal(f.engine.task('m').machine.startWatts,old.machine.startWatts);assert.equal(f.engine.task('m').orderId,'o');
+ f.engine.reconcile([{id:'o'}]);assert.ok(f.engine.task('m'));f.engine.reconcile([]);assert.equal(f.engine.task('m'),undefined);f.engine.close();
+});
+test('address recovery refuses active phases, different channels, and unallowlisted endpoints',async()=>{
+ for(const scenario of ['active','channel','allowlist']){
+  const f=fixture('shelly');await f.engine.command(f.command);if(scenario!=='active'){f.off();await f.engine.tick();}
+  if(scenario==='allowlist')f.engine.adapter.qualify=async()=>{throw Error('host_not_allowlisted');};
+  const current={...f.machine,channel:scenario==='channel'?1:0,device:{...f.machine.device,host:'192.168.30.68'}};
+  const r=(await f.engine.readings([current]))[0];assert.equal(r.deviceError,scenario==='allowlist'?'host_not_allowlisted':'mapping_mismatch');assert.equal(r.observedAt,undefined);assert.equal(f.sets,1);assert.equal(f.engine.task('m').machine.device.host,'192.168.1.50');
+  f.engine.reconcile([]);assert.ok(f.engine.task('m'));f.engine.close();
+ }
+});
+test('read failures never count cached output-off as a fresh observation or release a durable task',async()=>{
+ const f=fixture();await f.engine.command(f.command);f.off();await f.engine.tick();await f.engine.readings([f.machine]);
+ f.engine.adapter.read=async()=>{throw Error('device_unreachable');};
+ const r=(await f.engine.readings([f.machine]))[0];assert.equal(r.output,false);assert.equal(r.deviceError,'device_unreachable');assert.equal(r.observedAt,undefined);
+ f.engine.reconcile([]);assert.ok(f.engine.task('m'));f.engine.close();
+});
+test('reading an uncommissioned channel is allowed but relay writes retain commissioning gates',async()=>{
+ const calls=[];const a=new ShellyAdapter({allowHardware:false,allowedHosts:['192.168.30.68'],deviceHosts:{d:'192.168.30.68'},fetchImpl:async(url,o)=>{calls.push(JSON.parse(o.body).method);return {ok:true,json:async()=>({result:{output:false,apower:0}})};}});
+ const m={deviceId:'d',channel:2,hardwareApproved:false,device:{id:'d',mode:'shelly',host:'192.168.30.68'}};
+ assert.deepEqual(await a.read(m),{output:false,apower:0});await assert.rejects(()=>a.set(m,true),/hardware_not_commissioned/);await assert.rejects(()=>a.set(m,false),/hardware_not_commissioned/);assert.deepEqual(calls,['Switch.GetStatus']);
+ await assert.rejects(()=>a.read({...m,device:{...m.device,host:'192.168.30.69'}}),/host_not_allowlisted/);
+});
