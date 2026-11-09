@@ -7,11 +7,47 @@ export class BridgeEngine {
     if(path!==':memory:')mkdirSync(dirname(path),{recursive:true});
     this.db=new DatabaseSync(path);this.db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS journal(id TEXT PRIMARY KEY,data TEXT NOT NULL,ack TEXT); CREATE TABLE IF NOT EXISTS tasks(machine_id TEXT PRIMARY KEY,data TEXT NOT NULL);");
     this.adapter=adapter;this.now=now;this.speed=simulationSpeed;
-    for(const task of this.tasks())if(['enabling','loading','running'].includes(task.phase)&&task.machine.device.mode==='shelly')this.save({...task,phase:'uncertain',error:'bridge_restarted'});
+    for(const task of this.tasks())if(task.machine.device.mode==='shelly'){
+      if(['loading','running'].includes(task.phase))this.save({...task,recovering:true,recoveryPhase:task.phase,startConfirmSince:null,idleCandidate:null});
+      else if(task.phase==='enabling')this.save({...task,phase:'uncertain',error:'interrupted_enable'});
+      // Existing review locks are never silently released by a software upgrade.
+    }
   }
   tasks(){return this.db.prepare('SELECT data FROM tasks').all().map(r=>JSON.parse(r.data));}
   task(machineId){const r=this.db.prepare('SELECT data FROM tasks WHERE machine_id=?').get(machineId);return r&&JSON.parse(r.data);}
   save(task){this.db.prepare('INSERT INTO tasks VALUES(?,?) ON CONFLICT(machine_id) DO UPDATE SET data=excluded.data').run(task.machine.id,JSON.stringify(task));}
+  checkpoint(task,reading){
+    return {...task,output:reading.output,deviceError:null,checkpoint:{at:this.now(),deviceMac:reading.deviceMac,deviceUptime:reading.deviceUptime,energyWh:reading.energyWh,output:reading.output}};
+  }
+  verifyContinuity(task,reading){
+    const c=task.checkpoint;
+    if(c&&['loading','running'].includes(task.phase)&&c.output!==true)throw new Error('unexpected_power_loss');
+    if(!c?.deviceMac||!Number.isFinite(c.deviceUptime))return false;
+    if(!Number.isFinite(c.at))throw new Error('invalid_recovery_checkpoint');
+    if(reading.deviceMac!==c.deviceMac)throw new Error('device_identity_changed');
+    if(!Number.isFinite(reading.deviceUptime))throw new Error('device_identity_unavailable');
+    const elapsed=this.now()-c.at,uptimeElapsed=(reading.deviceUptime-c.deviceUptime)*1000;
+    if(elapsed<0||uptimeElapsed<0||Math.abs(elapsed-uptimeElapsed)>5000)throw new Error('device_restarted_or_clock_changed');
+    if(Number.isFinite(c.energyWh)&&Number.isFinite(reading.energyWh)&&reading.energyWh+0.001<c.energyWh)throw new Error('device_energy_reset');
+    return true;
+  }
+  recover(task,reading){
+    if(!task.recovering)return task;
+    if(!['loading','running'].includes(task.phase))throw new Error('invalid_recovery_phase');
+    if(reading.output!==true)throw new Error('unexpected_power_loss');
+    const continuous=this.verifyContinuity(task,reading);
+    const phase=task.recoveryPhase;
+    if(!['loading','running'].includes(phase))throw new Error('invalid_recovery_phase');
+    if(phase==='running'&&!Number.isFinite(task.startedAt))throw new Error('start_time_missing');
+    if(phase==='loading'&&this.now()>=task.loadingDeadline&&!task.startCandidate)throw new Error('start_during_outage_unknown');
+    // A legacy journal has no hardware checkpoint. Preserve its known start time,
+    // but require fresh running power before allowing automatic completion.
+    return {...task,phase,recovering:false,recoveryPhase:null,error:null,deviceError:null,monitoringResumedAt:this.now(),
+      completionNotBefore:this.now()+task.machine.minimumRunSeconds*1000,
+      needsActivityEvidence:task.needsActivityEvidence||!continuous,
+      loadingObservationGap:phase==='loading'||task.loadingObservationGap,
+      startConfirmSince:null,idleCandidate:null};
+  }
   async read(machine){return this.adapter.read(machine,this.task(machine.id));}
   async set(machine,on){await this.adapter.set(machine,on,this.task(machine.id));const reading=await this.read(machine);if(reading.output!==on)throw new Error('readback_mismatch');return reading;}
   async command(command){
@@ -28,7 +64,7 @@ export class BridgeEngine {
         await this.adapter.qualify(machine);
         task={orderId:command.orderId,machine,phase:'enabling',loadingSeconds:command.loadingSeconds,durationSeconds:command.durationSeconds,output:false};this.save(task);
         await this.set(machine,true);
-        task={...task,phase:'loading',output:true,activatedAt:this.now(),loadingDeadline:this.now()+command.loadingSeconds*1000};this.save(task);
+        task=this.checkpoint({...task,phase:'loading',output:true,activatedAt:this.now(),loadingDeadline:this.now()+command.loadingSeconds*1000},await this.read(machine));this.save(task);
         ack={ok:true,output:true,at:task.activatedAt};
       }else if(command.action==='simulate_start'){
         if(machine.device.mode!=='simulator'||task?.orderId!==command.orderId||task.phase!=='loading'||this.now()>task.loadingDeadline)throw new Error('cannot_simulate_start');
@@ -36,7 +72,8 @@ export class BridgeEngine {
       }else if(command.action==='disable'){
         if(task&&task.orderId!==command.orderId)throw new Error('order_mismatch');
         const reading=await this.read(machine);
-        const safe=task?.phase==='loading'&&(!task.startCandidate)&&reading.apower<=machine.idleWatts;
+        if(task&&machine.device.mode==='shelly')this.verifyContinuity(task,reading);
+        const safe=task?.phase==='loading'&&!task.recovering&&!task.loadingObservationGap&&(!task.startCandidate)&&reading.apower<=machine.idleWatts;
         const done=task?.phase==='completed'||task?.phase==='loading_expired';
         if(reading.output&&!(safe||done))throw new Error('unsafe_power_cut');
         await this.set(machine,false);
@@ -47,7 +84,7 @@ export class BridgeEngine {
       const reading=await this.read(machine).catch(()=>({output:true}));
       const current=this.task(machine.id);
       const definitelyNotStarted=reading.output===false&&(!current||current.phase==='enabling');
-      if(current)this.save({...current,phase:'uncertain',error:e.message,output:reading.output});
+      if(current)this.save({...current,phase:'uncertain',recovering:false,recoveryPhase:null,error:e.message,output:reading.output});
       ack={ok:false,output:reading.output,at:this.now(),definitelyNotStarted,error:e.message};
     }
     this.finish(command,ack);return ack;
@@ -56,55 +93,73 @@ export class BridgeEngine {
   async tick(){
     for(let task of this.tasks()){
       try{
-        const reading=await this.read(task.machine);const now=this.now();
+        let reading=await this.read(task.machine);const now=this.now();
+        if(task.recovering)task=this.recover(task,reading);
+        else if(['loading','running'].includes(task.phase))this.verifyContinuity(task,reading);
+        if(reading.apower>=task.machine.startWatts)task.needsActivityEvidence=false;
         if(['loading','running'].includes(task.phase)&&reading.output!==true)throw new Error('unexpected_power_loss');
         if(task.phase==='loading'){
           if(task.machine.device.mode==='shelly'){
             if(reading.apower>=task.machine.startWatts){
               task.startCandidate??=now;
               if(task.startCandidate>task.loadingDeadline)throw new Error('late_physical_start');
-              if(now-task.startCandidate>=task.machine.startConfirmSeconds*1000){task.phase='running';task.startedAt=task.startCandidate;task.startCandidate=null;}
-            }else if(reading.apower<=task.machine.idleWatts)task.startCandidate=null;
+              task.startConfirmSince??=now;
+              if(now-task.startConfirmSince>=task.machine.startConfirmSeconds*1000){task.phase='running';task.startedAt=task.startCandidate;task.startCandidate=null;}
+            }else if(reading.apower<=task.machine.idleWatts){task.startCandidate=null;task.startConfirmSince=null;}
           }
           if(task.phase==='loading'&&now>=task.loadingDeadline&&!task.startCandidate){
+            if(task.loadingObservationGap)throw new Error('start_during_outage_unknown');
             if(reading.apower>task.machine.idleWatts)throw new Error('start_detection_ambiguous');
-            await this.set(task.machine,false);task.phase='loading_expired';task.output=false;
+            reading=await this.set(task.machine,false);task.phase='loading_expired';task.output=false;
           }
         }
         if(task.phase==='running'){
           if(task.machine.device.mode==='simulator'){
-            if(now-task.startedAt>=Math.max(8000,task.durationSeconds*1000/this.speed)){await this.set(task.machine,false);task.phase='completed';task.output=false;}
+            if(now-task.startedAt>=Math.max(8000,task.durationSeconds*1000/this.speed)){reading=await this.set(task.machine,false);task.phase='completed';task.output=false;}
           }else{
-            if(reading.apower<=task.machine.idleWatts&&now-task.startedAt>=task.machine.minimumRunSeconds*1000){task.idleCandidate??=now;if(now-task.idleCandidate>=task.machine.idleConfirmSeconds*1000){await this.set(task.machine,false);task.phase='completed';task.output=false;}}
+            if(!task.needsActivityEvidence&&now>=(task.completionNotBefore||0)&&reading.apower<=task.machine.idleWatts&&now-task.startedAt>=task.machine.minimumRunSeconds*1000){task.idleCandidate??=now;if(now-task.idleCandidate>=task.machine.idleConfirmSeconds*1000){reading=await this.set(task.machine,false);task.phase='completed';task.output=false;}}
             else task.idleCandidate=null;
           }
         }
-        this.save(task);
-      }catch(e){this.save({...task,phase:'uncertain',error:e.message});}
+        this.save(this.checkpoint(task,reading));
+      }catch(e){
+        const transient=['device_unreachable','device_http_error','device_rpc_error','invalid_device_telemetry','fetch failed','The operation was aborted due to timeout'].includes(e.message)||e.name==='TimeoutError'||e.name==='TypeError';
+        this.save(transient&&['loading','running'].includes(task.phase)?{...task,recovering:true,recoveryPhase:task.recoveryPhase||task.phase,error:'device_unreachable',deviceError:'device_unreachable',idleCandidate:null,startConfirmSince:null}:{...task,phase:'uncertain',recovering:false,error:e.message});
+      }
     }
   }
   async recoverAddress(machine,task){
     if(!task||task.machine.device.host===machine.device.host)return task;
     const old=task.machine;
-    if(task.phase!=='uncertain'||old.id!==machine.id||old.deviceId!==machine.deviceId||old.locationId!==machine.locationId||old.channel!==machine.channel||old.device.id!==machine.device.id||old.device.mode!==machine.device.mode)throw new Error('mapping_mismatch');
+    if((task.phase!=='uncertain'&&!task.recovering)||old.id!==machine.id||old.deviceId!==machine.deviceId||old.locationId!==machine.locationId||old.channel!==machine.channel||old.device.id!==machine.device.id||old.device.mode!==machine.device.mode)throw new Error('mapping_mismatch');
     // Only replace the endpoint on a locked task. Keep every original safety threshold and never resume it.
     const recovered={...old,device:{...old.device,host:machine.device.host}};
     await this.adapter.qualify(recovered,{control:false});
     const reading=await this.adapter.read(recovered,task);
-    task={...task,machine:recovered,output:reading.output,deviceError:null};this.save(task);return task;
+    task={...task,phase:'uncertain',recovering:false,machine:recovered,output:reading.output,deviceError:null};this.save(task);return task;
   }
   async readings(machines){
     const readings=[];
     for(const machine of machines){
-            let task=this.task(machine.id);
+      let task=this.task(machine.id);
       try{
         task=await this.recoverAddress(machine,task);
         const target=task?.machine||machine,reading=await this.read(target);
-        if(task)this.save({...task,output:reading.output,deviceError:null});
-        readings.push({machineId:machine.id,orderId:task?.orderId,phase:task?.phase||(!reading.output?'idle':'uncertain'),activatedAt:task?.activatedAt,startedAt:task?.startedAt,...reading,error:task?.error,deviceError:null,deviceHost:target.device.host,observedAt:this.now()});
+        if(task){
+          // A report cannot overwrite the last continuity checkpoint before the
+          // safety loop verifies it, nor publish an unverified running phase.
+          if(task.recovering)task=this.recover(task,reading);
+          else if(['loading','running'].includes(task.phase)){
+            if(reading.output!==true)throw new Error('unexpected_power_loss');
+            this.verifyContinuity(task,reading);
+          }
+          task=this.checkpoint(task,reading);this.save(task);
+        }
+        readings.push({machineId:machine.id,orderId:task?.orderId,phase:task?.phase||(!reading.output?'idle':'uncertain'),activatedAt:task?.activatedAt,startedAt:task?.startedAt,monitoringResumedAt:task?.monitoringResumedAt,...reading,error:task?.error,deviceError:null,deviceHost:target.device.host,observedAt:this.now()});
       }catch(e){
         const deviceError=/^[a-z_]{1,60}$/.test(e.message)?e.message:'device_unreachable';
-        if(task)this.save({...task,deviceError});
+        const fatal=['unexpected_power_loss','device_identity_changed','device_identity_unavailable','device_restarted_or_clock_changed','device_energy_reset','invalid_recovery_checkpoint','invalid_recovery_phase','start_time_missing','start_during_outage_unknown'].includes(deviceError);
+        if(task)this.save(fatal?{...task,phase:'uncertain',recovering:false,error:deviceError,deviceError}:{...task,deviceError});
         readings.push({machineId:machine.id,orderId:task?.orderId,phase:'uncertain',output:task?.output??true,error:deviceError,deviceError});
       }
     }return readings;

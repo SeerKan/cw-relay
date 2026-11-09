@@ -31,9 +31,9 @@ Cu `allow_hardware: false`, lista de dispozitive poate fi goală pentru testarea
 
 La pierderea internetului, watchdog-ul nu repornește conectorul doar fiindcă serviciul CozyWash nu răspunde. Jurnalul și temporizările locale continuă. La revenirea conexiunii, comenzile și telemetria se reconciliază. O comandă deja confirmată păstrează confirmarea inițială și nu reaplică alimentarea.
 
-La o repornire a add-on-ului sau a mini PC-ului, sesiunile fizice active sunt marcate incerte pentru verificarea operatorului. Nu sunt pornite automat încă o dată. Durata estimată a programului nu este folosită singură pentru oprirea unei mașini reale.
+Începând cu 1.1.0, restartul add-on-ului păstrează sesiunea, momentul pornirii și termenul inițial. Monitorizarea se reia după o citire nouă, verificând identitatea MAC, uptime-ul Shelly și contorul de energie. Nu se retrimite pornirea releului. Confirmarea consumului/finalului începe din observații noi, iar intervalul fără observații nu confirmă finalul. O repornire a Shelly, un releu găsit oprit sau date contradictorii păstrează verificarea operatorului. Durata estimată singură nu oprește aparatul.
 
-Datele sunt în `/data/bridge/bridge.sqlite`, cu fișierele WAL alăturate. Home Assistant include directorul privat `/data` în backup-ul add-on-ului; add-on-ul declară backup de tip cold, astfel că Supervisor îl oprește pentru o copie consistentă. Programează backup-urile când mașinile sunt inactive; o sesiune fizică activă la repornire necesită verificare. Nu șterge jurnalul pentru a „debloca” o mașină și nu restaura un jurnal vechi peste echipamente aflate în funcțiune. Nu rula două instanțe pentru aceeași locație.
+Datele sunt în `/data/bridge/bridge.sqlite`, cu fișierele WAL alăturate. Home Assistant include directorul privat `/data` în backup-ul add-on-ului; add-on-ul declară backup de tip cold, astfel că Supervisor îl oprește pentru o copie consistentă. Programează backup-urile când mașinile sunt inactive; o sesiune activă este recuperată conform verificărilor de continuitate de mai sus. Nu șterge jurnalul pentru a „debloca” o mașină și nu restaura un jurnal vechi peste echipamente aflate în funcțiune. Nu rula două instanțe pentru aceeași locație.
 
 ## Diagnosticare
 
@@ -56,3 +56,8 @@ Pentru actualizare, folosește **Update** în Home Assistant și păstrează dat
 Configurează noul IP pentru același device_id în conector și salvează/repornește. În CozyWash → Dispozitive modifică exclusiv IP-ul. Schimbarea este permisă dacă toate comenzile afectate sunt în verificare; o sesiune în desfășurare blochează în continuare schimbarea. Comenzile vechi în așteptare se anulează și citirile vechi se invalidează.
 
 Conectorul poate muta doar adresa unui jurnal incert, păstrând canalul, pragurile, istoricul și blocarea. Citește adresa nouă numai dacă lista locală o permite pentru același dispozitiv. Nu pornește și nu oprește releul pentru recuperare. După o citire nouă care confirmă ieșirea oprită, operatorul verifică aparatul și rezolvă comanda din CozyWash → Comenzi. Jurnalul se eliberează după confirmarea serverului. Nu șterge jurnalul.
+
+
+## Limitele recuperării
+
+Un jurnal vechi fără checkpoint hardware, dar cu pornire deja confirmată, păstrează cronometrul; înainte de finalizarea automată cere consum activ nou și un interval minim de monitorizare. O sesiune deja în verificare nu este rezolvată automat. O activare întreruptă exact înainte de confirmarea releului sau o fereastră de încărcare traversată fără nicio dovadă de pornire cere verificare; timpul pornirii nu se inventează.

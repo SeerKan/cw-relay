@@ -59,11 +59,22 @@ def main():
   docker('stop','--time','20',ADDON)
   assert json.loads(docker('inspect',ADDON))[0]['State']['ExitCode']==0
   control({'replay':True});docker('start',ADDON)
+  until(lambda:any(r.get('phase')=='running' and r.get('monitoringResumedAt') for r in cloud('/test/state')['readings']))
+  restored=next(r for r in cloud('/test/state')['readings'] if r.get('phase')=='running')
+  started_at=restored['startedAt']
+  assert health()['uncertainTasks']==0
+  assert len(cloud('/test/state')['sets'])==before and cloud('/test/state')['output']
+  # Abrupt crash: committed journal must preserve the same start time too.
+  docker('kill','--signal','KILL',ADDON);docker('start',ADDON)
+  until(lambda:any(r.get('phase')=='running' and r.get('startedAt')==started_at for r in cloud('/test/state')['readings']))
+  assert health()['uncertainTasks']==0 and len(cloud('/test/state')['sets'])==before
+  # A hardware reboot is distinct from a software restart, even if output stays on.
+  control({'bootAt':int(time.time()*1000)})
   until(lambda:health()['uncertainTasks']==1)
-  until(lambda:any(r.get('error')=='bridge_restarted' for r in cloud('/test/state')['readings']))
+  until(lambda:any(r.get('error')=='device_restarted_or_clock_changed' for r in cloud('/test/state')['readings']))
   assert len(cloud('/test/state')['sets'])==before and cloud('/test/state')['output']
   assert 'T'*43 not in docker('logs',ADDON) and 'fixture-password' not in docker('logs',ADDON)
-  print('PASS: graceful stop/restart persists journal, marks real-mode task uncertain, and does not replay power activation',flush=True)
+  print('PASS: graceful restart and SIGKILL preserve running session/start time without replay; hardware reboot retains review lock',flush=True)
   print('PASS: logs contain no configured token or Shelly password',flush=True)
  finally:
   for name in [ADDON,EMULATOR]:subprocess.run(['docker','rm','-f',name],capture_output=True)

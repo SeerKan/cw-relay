@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 — 2026-11-09
+
+- Sesiunile în încărcare/rulare și momentele originale se păstrează la restart/deploy; releul este verificat înainte de reluarea monitorizării, fără retrimiterea pornirii.
+- Jurnalul păstrează checkpoint-uri cu identitatea Shelly, uptime și consumul contorizat. Repornirea hardware, pierderea alimentării sau contradicțiile păstrează verificarea operatorului.
+- Confirmarea consumului și a finalului se reia din citiri noi; intervalele fără observații nu sunt contabilizate drept oprire confirmată.
+- Jurnalele vechi cu pornire cunoscută păstrează cronometrul, dar cer consum activ nou înainte de finalizare automată. Sesiunile deja blocate și pornirile neconfirmate nu sunt rezolvate prin presupuneri.
+
+
 ## 1.0.2 — 2026-11-09
 
 - Sincronizarea cloud așteaptă finalizarea citirii locale în curs, evitând întreruperea telemetriei prin suprapunerea temporizatoarelor.

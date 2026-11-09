@@ -20,7 +20,7 @@ export class ShellyAdapter {
     if(!Number.isInteger(machine.channel)||machine.channel<0||machine.channel>3)throw new Error('invalid_channel');
   }
   async rpc(machine,method,params){
-    await this.qualify(machine,{control:method!=='Switch.GetStatus'});
+    await this.qualify(machine,{control:!['Switch.GetStatus','Sys.GetStatus'].includes(method)});
     const url=`http://${machine.device.host}/rpc`,body=JSON.stringify({id:1,method,params}),options={method:'POST',headers:{'Content-Type':'application/json'},body,signal:AbortSignal.timeout(4000),redirect:'error'};
     let response=await this.fetch(url,options);
     if(response.status===401){const password=this.passwords[machine.device.id];if(!password)throw new Error('device_credentials_missing');const challenge=response.headers.get('www-authenticate')||'';await response.arrayBuffer();response=await this.fetch(url,{...options,headers:{...options.headers,Authorization:digestHeader(challenge,password)},signal:AbortSignal.timeout(4000)});}
@@ -28,7 +28,10 @@ export class ShellyAdapter {
   }
   async read(machine,task){
     if(machine.device.mode==='simulator'){const output=this.simOutputs.has(machine.id)?this.simOutputs.get(machine.id):task?.output??false;return {output,apower:output&&task?.phase==='running'?400:0};}
-    const data=await this.rpc(machine,'Switch.GetStatus',{id:machine.channel});if(typeof data?.output!=='boolean'||!Number.isFinite(data.apower))throw new Error('invalid_device_telemetry');return {output:data.output,apower:data.apower};
+    const data=await this.rpc(machine,'Switch.GetStatus',{id:machine.channel});
+    const sys=await this.rpc(machine,'Sys.GetStatus',{});
+    if(typeof data?.output!=='boolean'||!Number.isFinite(data.apower)||typeof sys?.mac!=='string'||!/^[a-f0-9]{12}$/i.test(sys.mac)||!Number.isFinite(sys.uptime)||sys.uptime<0)throw new Error('invalid_device_telemetry');
+    return {output:data.output,apower:data.apower,deviceMac:sys.mac.toUpperCase(),deviceUptime:sys.uptime,...(Number.isFinite(data.aenergy?.total)?{energyWh:data.aenergy.total}:{})};
   }
   async set(machine,on){
     if(machine.device.mode==='simulator'){this.simOutputs.set(machine.id,on);return;}

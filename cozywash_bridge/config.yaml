@@ -1,5 +1,5 @@
 name: CozyWash Shelly Connector
-version: "1.0.2"
+version: "1.1.0"
 slug: cozywash_bridge
 description: Conectează locația CozyWash la dispozitivele Shelly din rețeaua locală.
 url: https://github.com/SeerKan/cw-relay
