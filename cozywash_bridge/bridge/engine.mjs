@@ -67,6 +67,16 @@ export class BridgeEngine {
       loadingObservationGap:phase==='loading'||task.loadingObservationGap,
       startConfirmSince:null,idleCandidate:null};
   }
+  dryerLimit(task){
+    return !task.manualId && task.machine.type==='dryer' && task.machine.cyclePolicy?.dryerMaxRunPercent===150 &&
+      Number.isFinite(task.startedAt) && Number.isFinite(task.durationSeconds) && task.durationSeconds>0
+      ? task.startedAt+task.durationSeconds*1500 : null;
+  }
+  pendingDryerStop(task){return task.phase==='running' && Number.isFinite(task.dryerStopRequestedAt) && this.dryerLimit(task)!==null;}
+  dryerCompleted(task){
+    return {...task,phase:'completed',output:false,recovering:false,recoveryPhase:null,error:null,deviceError:null,
+      completedAt:this.now(),cycleEndedAt:this.now(),completionReason:'dryer_time_limit'};
+  }
   async read(machine){return this.adapter.read(machine,this.task(machine.id));}
   async set(machine,on){await this.adapter.set(machine,on,this.task(machine.id));const reading=await this.read(machine);if(reading.output!==on)throw new Error('readback_mismatch');return reading;}
   async command(command){
@@ -143,6 +153,12 @@ export class BridgeEngine {
         let reading=await this.read(task.machine);const now=this.now();
         task=this.measure(task,reading);
         if(task.manualId){this.save(this.observeManual(task,reading));continue;}
+        if(this.pendingDryerStop(task)){
+          // OFF intent is durable before the write. A restart can confirm OFF without replaying ON.
+          this.verifyContinuity(task,reading);
+          if(reading.output)reading=await this.set(task.machine,false);
+          task=this.dryerCompleted(task);this.save(this.checkpoint(task,reading));continue;
+        }
         if(task.recovering)task=this.recover(task,reading);
         else if(['loading','running'].includes(task.phase))this.verifyContinuity(task,reading);
         if(reading.apower>=task.machine.startWatts)task.needsActivityEvidence=false;
@@ -163,7 +179,11 @@ export class BridgeEngine {
           }
         }
         if(task.phase==='running'){
-          if(task.machine.device.mode==='simulator'){
+          const limit=this.dryerLimit(task);
+          if(limit!==null&&now>limit){
+            task={...task,dryerStopRequestedAt:now};this.save(task);
+            reading=await this.set(task.machine,false);task=this.dryerCompleted(task);
+          }else if(task.machine.device.mode==='simulator'){
             if(now-task.startedAt>=Math.max(8000,task.durationSeconds*1000/this.speed)){reading=await this.set(task.machine,false);task.phase='completed';task.output=false;task.completedAt=now;task.cycleEndedAt=now;}
           }else{
             if(!task.needsActivityEvidence&&now>=(task.completionNotBefore||0)&&reading.apower<=task.machine.idleWatts&&now-task.startedAt>=task.machine.minimumRunSeconds*1000){task.idleCandidate??=now;if(now-task.idleCandidate>=task.machine.idleConfirmSeconds*1000){reading=await this.set(task.machine,false);task.phase='completed';task.output=false;task.completedAt=now;task.cycleEndedAt=task.idleCandidate;}}
@@ -200,14 +220,16 @@ export class BridgeEngine {
         else if(task){
           // A report cannot overwrite the last continuity checkpoint before the
           // safety loop verifies it, nor publish an unverified running phase.
-          if(task.recovering)task=this.recover(task,reading);
+          if(this.pendingDryerStop(task)&&reading.output===false){
+            this.verifyContinuity(task,reading);task=this.dryerCompleted(task);
+          }else if(task.recovering)task=this.recover(task,reading);
           else if(['loading','running'].includes(task.phase)){
             if(reading.output!==true)throw new Error('unexpected_power_loss');
             this.verifyContinuity(task,reading);
           }
           task=this.checkpoint(task,reading);this.save(task);
         }
-        readings.push({machineId:machine.id,manualRelaySupported:true,manualId:task?.manualId,manualCommandId:task?.manualCommandId,orderId:task?.orderId,phase:task?.phase||(!reading.output?'idle':'uncertain'),activatedAt:task?.activatedAt,startedAt:task?.startedAt,monitoringResumedAt:task?.monitoringResumedAt,usage:this.usage(task),...reading,error:task?.error,deviceError:null,deviceHost:target.device.host,observedAt:this.now()});
+        readings.push({machineId:machine.id,manualRelaySupported:true,manualId:task?.manualId,manualCommandId:task?.manualCommandId,orderId:task?.orderId,phase:task?.phase||(!reading.output?'idle':'uncertain'),activatedAt:task?.activatedAt,startedAt:task?.startedAt,monitoringResumedAt:task?.monitoringResumedAt,usage:this.usage(task),completionReason:task?.completionReason,...reading,error:task?.error,deviceError:null,deviceHost:target.device.host,observedAt:this.now()});
       }catch(e){
         const deviceError=/^[a-z_]{1,60}$/.test(e.message)?e.message:'device_unreachable';
         if(task&&['device_identity_changed','device_restarted_or_clock_changed','device_energy_reset'].includes(deviceError))task={...task,energyStatus:'invalid'};

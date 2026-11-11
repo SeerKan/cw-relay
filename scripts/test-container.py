@@ -68,8 +68,21 @@ def main():
   assert next(r['usage'] for r in cloud('/test/state')['readings'] if r.get('phase')=='completed')==usage
   control({'orders':[],'command':None});until(lambda:health()['activeTasks']==0)
   print('PASS: per-order meter delta, physical completion timing and frozen measurements survive cloud outage',flush=True)
+  control({'newOrder':'dryer-overrun','power':400,'durationSeconds':4,'dryer':True})
+  until(lambda:any(r.get('phase')=='running' for r in cloud('/test/state')['readings']))
+  dryer_started=next(r['startedAt'] for r in cloud('/test/state')['readings'] if r.get('phase')=='running')
+  control({'online':False})
+  until(lambda:not cloud('/test/state')['output'],timeout=15)
+  control({'online':True})
+  until(lambda:any(r.get('phase')=='completed' for r in cloud('/test/state')['readings']))
+  dryer_done=next(r for r in cloud('/test/state')['readings'] if r.get('phase')=='completed')
+  assert dryer_done['completionReason']=='dryer_time_limit'
+  assert dryer_done['usage']['completedAt']>dryer_started+6000
+  assert dryer_done['usage']['energyComplete'] and not dryer_done['output']
+  control({'orders':[],'command':None});until(lambda:health()['activeTasks']==0)
+  print('PASS: actual packaged connector stops the emulated dryer beyond 150% during cloud outage and reports confirmed completion',flush=True)
   control({'newOrder':'restart-safe','loadingSeconds':60,'power':50});until(lambda:any(r.get('phase')=='running' for r in cloud('/test/state')['readings']))
-  before=len(cloud('/test/state')['sets']);assert before==5
+  before=len(cloud('/test/state')['sets']);assert before==7
   # Docker versions may include deprecation notices in stdout; the command's
   # successful exit and the container exit status are the shutdown contract.
   docker('stop','--time','20',ADDON)

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.0 — 2026-11-11
+
+- Sesiunile noi de uscător cu politica de limitare se opresc local după depășirea a 150% din durata selectată, măsurată de la pornirea detectată.
+- Finalizarea este raportată numai după confirmarea releului oprit; intenția de oprire și cronometrul supraviețuiesc restartului și lipsei conexiunii cloud.
+- Mașinile de spălat, controlul manual și sesiunile vechi fără această politică își păstrează comportamentul.
+
 ## 1.3.0 — 2026-11-09
 
 - Consum în Wh pe comandă, cu bază de contor păstrată în jurnal și măsurare invalidată la resetarea contorului sau schimbarea dispozitivului.

@@ -25,7 +25,7 @@ http(async(req,res)=>{
 }).listen(80,'0.0.0.0');
 https({key:readFileSync('/fixture/tls/key.pem'),cert:readFileSync('/fixture/tls/cert.pem')},async(req,res)=>{
  if(req.url==='/test/state')return send(res,state);
- if(req.url==='/test/control'){const body=await read(req);Object.assign(state,body);if(body.newOrder){const oid=body.newOrder;state.command={id:oid+':enable',orderId:oid,action:'enable',locationId:'test-location',machine,loadingSeconds:body.loadingSeconds||60,durationSeconds:1800,deadline:Date.now()+15000};state.orders=[{id:oid,status:'activating'}];state.acks=[];state.readings=[];state.replay=false;}return send(res,{ok:true});}
+ if(req.url==='/test/control'){const body=await read(req);Object.assign(state,body);if(body.newOrder){const oid=body.newOrder;state.command={id:oid+':enable',orderId:oid,action:'enable',locationId:'test-location',machine:{...machine,...(body.dryer?{type:'dryer',cyclePolicy:{dryerMaxRunPercent:150}}:{})},loadingSeconds:body.loadingSeconds||60,durationSeconds:body.durationSeconds||1800,deadline:Date.now()+15000};state.orders=[{id:oid,status:'activating'}];state.acks=[];state.readings=[];state.replay=false;}return send(res,{ok:true});}
  if(!state.online)return send(res,{error:'test_outage'},503);
  if(req.headers.authorization!=='Bearer '+ 'T'.repeat(43))return send(res,{error:'unauthorized'},401);
  const snapshot=()=>({serverTime:Date.now(),machines:[machine],commands:state.command&&(state.replay||!state.acks.length)?[state.command]:[],orders:state.orders});

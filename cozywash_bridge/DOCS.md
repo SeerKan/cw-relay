@@ -71,3 +71,9 @@ Un jurnal vechi fără checkpoint hardware, dar cu pornire deja confirmată, pă
 Administrarea afișează puterea canalului în W și contorul Shelly în kWh. Consumul unei comenzi este diferența contorului canalului între alimentarea releului și oprirea confirmată, incluzând încărcarea și confirmarea finalului. Durata efectivă este intervalul între pornirea detectată și începutul perioadei de consum redus care a confirmat finalul, fără timpul de confirmare. Precizia depinde de citiri și de pragurile configurate; durata programului rămâne o estimare separată și nu oprește aparatul.
 
 Baza contorului și momentele sunt păstrate în jurnal. Resetările contorului, repornirea Shelly și schimbarea identității invalidează consumul comenzii. Un contor absent sau un jurnal vechi fără bază de contor apare indisponibil, nu zero. Simulările sunt marcate și nu intră în totalul consumului real.
+
+## Limita sesiunilor de uscător — 1.4.0
+
+Pentru sesiunile noi primite cu politica de uscător, conectorul oprește releul după depășirea a 150% din durata selectată, de la pornirea detectată. Un program de 60 minute are limita la 90 minute. Cronometrul original și intenția de oprire sunt păstrate în jurnal la restart; regula funcționează local și fără cloud. Serverul și clientul primesc finalizarea numai după citirea care confirmă OFF. O oprire neconfirmată sau o schimbare de identitate/restart hardware păstrează verificarea, fără notificare falsă de finalizare.
+
+Regula nu se aplică mașinilor de spălat, intervențiilor manuale sau sesiunilor vechi fără politică. Actualizarea conectorului local la 1.4.0 este necesară; o actualizare doar a aplicației web nu activează limita pe un conector mai vechi. Calificarea hardware se păstrează.
